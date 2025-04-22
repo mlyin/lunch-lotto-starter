@@ -20,6 +20,10 @@
     <div id="main-view">
       <div id="wheel-container">
         <img id="loading-gif" src="assets/loading.gif" alt="Loading..." style="display: none;">
+        <div id="progress-container" style="display: none;">
+          <div id="progress-bar"></div>
+          <div id="progress-text">Loading restaurants...</div>
+        </div>
         <canvas id="wheel" width="310" height="310"></canvas>
         <button id="spin">Spin</button>
       </div>
@@ -27,6 +31,10 @@
       <div id="result-container" style="display: none;">
         <p id="selected-restaurant"></p>
         <a id="google-maps-link" href="#" target="_blank" style="display: none;">View on Google Maps</a>
+      </div>
+      <div id="history-container">
+        <h3>Recent Selections</h3>
+        <div id="history-list"></div>
       </div>
       <!-- <button id="open-settings">Settings</button> -->
       <button id="open-settings">

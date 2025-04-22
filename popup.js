@@ -3,6 +3,7 @@ const defaultSettings = {
   distance: 0.5,       // Default search radius in miles
   price: "2,3",        // Google Places API uses 1-4 ($ - $$$$)
   dietary: "",         // Empty means no filter (future: vegetarian, gluten-free, etc.)
+  history: [],         // Array to store restaurant history
 };
 // Convert miles to meters (Google Maps API uses meters)
 function milesToMeters(miles) {
@@ -18,18 +19,71 @@ async function loadSettings() {
   });
 }
 
+// Update progress bar
+function updateProgress(percent, text) {
+  const progressBar = document.getElementById('progress-bar');
+  const progressText = document.getElementById('progress-text');
+  progressBar.style.setProperty('--progress', `${percent}%`);
+  progressBar.style.width = `${percent}%`;
+  progressText.textContent = text;
+}
+
+// Add restaurant to history
+async function addToHistory(restaurant) {
+  const settings = await loadSettings();
+  const history = settings.history || [];
+  
+  // Add new restaurant with timestamp
+  history.unshift({
+    name: restaurant.name,
+    timestamp: new Date().toISOString(),
+    googleMapsLink: restaurant.googleMapsLink
+  });
+  
+  // Keep only last 10 entries
+  if (history.length > 10) {
+    history.pop();
+  }
+  
+  // Save updated history
+  await chrome.storage.sync.set({ history });
+  
+  // Update history display
+  displayHistory();
+}
+
+// Display history
+async function displayHistory() {
+  const settings = await loadSettings();
+  const historyList = document.getElementById('history-list');
+  const history = settings.history || [];
+  
+  historyList.innerHTML = history.map(item => `
+    <div class="history-item">
+      <span class="restaurant-name">${item.name}</span>
+      <span class="timestamp">${new Date(item.timestamp).toLocaleDateString()}</span>
+    </div>
+  `).join('');
+}
+
 async function fetchRestaurants() {
     try {
-      // 🔄 Show Loading GIF and Hide the Wheel
+      // Show progress container and hide wheel
       document.getElementById("loading-gif").style.display = "block";
+      document.getElementById("progress-container").style.display = "block";
       document.getElementById("wheel").style.display = "none";
+      
+      updateProgress(20, "Getting your location...");
   
       navigator.geolocation.getCurrentPosition(async (position) => {
+        updateProgress(40, "Location found! Searching for restaurants...");
+        
         const { latitude: lat, longitude: lng } = position.coords;
         const settings = await loadSettings();
   
         const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${milesToMeters(settings.distance)}&type=restaurant&keyword=healthy&minprice=${settings.price[0]}&maxprice=${settings.price[2]}&key=${apiKey}`;
   
+        updateProgress(60, "Fetching restaurant data...");
         const response = await fetch(url);
         const data = await response.json();
   
@@ -39,6 +93,8 @@ async function fetchRestaurants() {
           return;
         }
   
+        updateProgress(80, "Processing restaurant data...");
+        
         // ✅ Extract restaurant data
         let restaurants = data.results.map((place) => ({
           name: place.name,
@@ -68,27 +124,32 @@ async function fetchRestaurants() {
           return acc;
         }, {});
   
-        // ⏳ Wait 5 seconds before showing the wheel
+        updateProgress(100, "Ready to spin!");
+        
+        // Hide loading elements and show wheel after a short delay
         setTimeout(() => {
-          document.getElementById("loading-gif").style.display = "none"; // ✅ Hide Loading GIF
-          document.getElementById("wheel").style.display = "block"; // ✅ Show the wheel
-          updateWheel(restaurants); // ✅ Update the wheel with restaurant names
-        }, 2000);
+          document.getElementById("loading-gif").style.display = "none";
+          document.getElementById("progress-container").style.display = "none";
+          document.getElementById("wheel").style.display = "block";
+          updateWheel(restaurants);
+        }, 1000);
   
       }, (error) => {
         console.error("❌ Geolocation error:", error);
         alert("Please enable location access to fetch restaurants.");
-        document.getElementById("loading-gif").style.display = "none"; // ✅ Hide loading GIF on error
+        document.getElementById("loading-gif").style.display = "none";
+        document.getElementById("progress-container").style.display = "none";
         document.getElementById("wheel").style.display = "block";
       });
     } catch (error) {
       console.error("❌ Error fetching restaurants:", error);
-      document.getElementById("loading-gif").style.display = "none"; // ✅ Hide loading GIF on error
+      document.getElementById("loading-gif").style.display = "none";
+      document.getElementById("progress-container").style.display = "none";
       document.getElementById("wheel").style.display = "block";
     }
-  }  
+}
 
-  function updateWheel(restaurants) {
+function updateWheel(restaurants) {
     options.length = 0; // Clear the current options array
   
     // Randomly shuffle the restaurants array
@@ -129,9 +190,27 @@ function hideSettings() {
   document.getElementById("settings-view").style.display = "none";
 }
 
+// Modify the spin function to add to history
+function spin() {
+  const result = spinWheel();
+  if (result) {
+    const selectedRestaurant = restaurantDetails.find(r => r.name === result);
+    if (selectedRestaurant) {
+      document.getElementById("selected-restaurant").textContent = result;
+      document.getElementById("google-maps-link").href = selectedRestaurant.googleMapsLink;
+      document.getElementById("google-maps-link").style.display = "block";
+      document.getElementById("result-container").style.display = "block";
+      
+      // Add to history
+      addToHistory(selectedRestaurant);
+    }
+  }
+}
+
 // Ensure scripts run only after DOM is loaded
 document.addEventListener("DOMContentLoaded", async () => {
   await fetchRestaurants();
+  await displayHistory(); // Display initial history
 
   // Spin button event
   document.getElementById("spin").addEventListener("click", () => spin());

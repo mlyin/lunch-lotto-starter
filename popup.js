@@ -33,8 +33,9 @@ async function addToHistory(restaurant) {
   const settings = await loadSettings();
   const history = settings.history || [];
   
-  // Add new restaurant with timestamp
+  // Add new restaurant with timestamp and ID
   history.unshift({
+    id: restaurant.id,
     name: restaurant.name,
     timestamp: new Date().toISOString(),
     googleMapsLink: restaurant.googleMapsLink
@@ -58,13 +59,56 @@ async function displayHistory() {
   const historyList = document.getElementById('history-list');
   const history = settings.history || [];
   
+  // Load favorites
+  const favoritesResult = await chrome.storage.local.get(['favorites']);
+  const favorites = new Set(favoritesResult.favorites || []);
+  
+  if (history.length === 0) {
+    historyList.innerHTML = '<div class="history-item">No selections yet</div>';
+    return;
+  }
+  
   historyList.innerHTML = history.map(item => `
     <div class="history-item">
       <span class="restaurant-name">${item.name}</span>
       <span class="timestamp">${new Date(item.timestamp).toLocaleDateString()}</span>
+      <button class="favorite-btn ${favorites.has(item.id) ? 'favorited' : ''}" 
+              onclick="toggleFavorite('${item.id}')">
+        ${favorites.has(item.id) ? '★' : '☆'}
+      </button>
     </div>
   `).join('');
 }
+
+// Add toggleFavorite function to window scope so it can be called from HTML
+window.toggleFavorite = async function(restaurantId) {
+  try {
+    const favoritesResult = await chrome.storage.local.get(['favorites']);
+    let favorites = new Set(favoritesResult.favorites || []);
+    
+    if (favorites.has(restaurantId)) {
+      favorites.delete(restaurantId);
+    } else {
+      favorites.add(restaurantId);
+    }
+    
+    await chrome.storage.local.set({ favorites: Array.from(favorites) });
+    
+    // Update the button state immediately
+    const button = document.querySelector(`button[onclick="toggleFavorite('${restaurantId}')"]`);
+    if (button) {
+      button.classList.toggle('favorited');
+      button.innerHTML = favorites.has(restaurantId) ? '★' : '☆';
+    }
+    
+    // Update the wheel to reflect changes
+    if (typeof drawWheel === 'function') {
+      drawWheel();
+    }
+  } catch (error) {
+    console.error('Error toggling favorite:', error);
+  }
+};
 
 async function fetchRestaurants() {
     try {
@@ -97,6 +141,7 @@ async function fetchRestaurants() {
         
         // ✅ Extract restaurant data
         let restaurants = data.results.map((place) => ({
+          id: place.place_id, // Add unique ID
           name: place.name,
           distance: (settings.distance).toFixed(1),
           price: place.price_level ? "$".repeat(place.price_level) : "Unknown",
@@ -150,7 +195,8 @@ async function fetchRestaurants() {
 }
 
 function updateWheel(restaurants) {
-    options.length = 0; // Clear the current options array
+    // Clear the current options array
+    options = [];
   
     // Randomly shuffle the restaurants array
     const shuffledRestaurants = [...restaurants].sort(() => Math.random() - 0.5);
@@ -158,26 +204,25 @@ function updateWheel(restaurants) {
     // Choose 8 random restaurants
     const selectedRestaurants = shuffledRestaurants.slice(0, 8);
   
-    // Extract restaurant names and Google Maps links, and populate options array
-    options.push(...selectedRestaurants.map((restaurant) => ({
+    // Set the options array with restaurant names, links, and IDs
+    options = selectedRestaurants.map((restaurant) => ({
+      id: restaurant.id,
       name: restaurant.name,
-      googleMapsLink: restaurant.googleMapsLink, // Add Google Maps link
-    })));
-  
-    // Debugging: Log the selected restaurants with their links
-    console.log("✅ Options for the Wheel:", options);
-  
-    // Store full restaurant details, including names and links
-    restaurantDetails = selectedRestaurants.map((restaurant) => ({
-      name: restaurant.name,
-      googleMapsLink: restaurant.googleMapsLink // Add the Google Maps link
+      googleMapsLink: restaurant.googleMapsLink
     }));
   
+    // Store restaurant details globally
+    restaurantDetails = selectedRestaurants.reduce((acc, r) => {
+      acc[r.name] = r;
+      return acc;
+    }, {});
+  
+    console.log("✅ Options for the Wheel:", options);
     console.log("✅ Selected Restaurants for the Wheel:", restaurantDetails);
   
     // Redraw the wheel with the updated options
     drawWheel();
-  }  
+}
 
 // 🛠️ Toggle Settings View
 function showSettings() {
@@ -192,19 +237,20 @@ function hideSettings() {
 
 // Modify the spin function to add to history
 function spin() {
-  const result = spinWheel();
-  if (result) {
-    const selectedRestaurant = restaurantDetails.find(r => r.name === result);
-    if (selectedRestaurant) {
-      document.getElementById("selected-restaurant").textContent = result;
-      document.getElementById("google-maps-link").href = selectedRestaurant.googleMapsLink;
-      document.getElementById("google-maps-link").style.display = "block";
-      document.getElementById("result-container").style.display = "block";
-      
-      // Add to history
-      addToHistory(selectedRestaurant);
-    }
+  // Call the spin function from wheel.js
+  if (options.length === 0) {
+    alert("Please wait while we load restaurants...");
+    return;
   }
+  
+  // Start the spin animation
+  spinAngleStart = Math.random() * 10 + 10;
+  spinTime = 0;
+  spinTimeTotal = Math.random() * 3000 + 3000;
+  rotateWheel();
+  
+  // The result will be handled in the rotateWheel function in wheel.js
+  // which will call addToHistory when the spin is complete
 }
 
 // Ensure scripts run only after DOM is loaded
@@ -213,7 +259,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await displayHistory(); // Display initial history
 
   // Spin button event
-  document.getElementById("spin").addEventListener("click", () => spin());
+  document.getElementById("spin").addEventListener("click", spin);
 
   // Open settings view
   document.getElementById("open-settings").addEventListener("click", showSettings);

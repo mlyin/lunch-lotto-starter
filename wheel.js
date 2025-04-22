@@ -1,11 +1,35 @@
 const canvas = document.getElementById("wheel");
 const ctx = canvas.getContext("2d");
 
-const options = ["", "", "", "", "", "", "", ""];
+let options = [];  // Changed to let since we modify it
 const colors = ["#F69C9E", "#BCECE6", "#73D5D1", "#FFEED9"];
+const favoriteColor = "#FFD700"; // Gold color for favorites
+let favorites = new Set(); // Store favorite restaurant IDs
+
+// Load favorites from storage when the script starts
+chrome.storage.local.get(['favorites'], function(result) {
+  if (result.favorites) {
+    favorites = new Set(result.favorites);
+  }
+});
+
+function saveFavorites() {
+  chrome.storage.local.set({ favorites: Array.from(favorites) });
+}
+
+function toggleFavorite(restaurantId) {
+  if (favorites.has(restaurantId)) {
+    favorites.delete(restaurantId);
+  } else {
+    favorites.add(restaurantId);
+  }
+  saveFavorites();
+  drawWheel(); // Redraw the wheel to reflect changes
+}
+
 // #051F20 #0B2B26 #163832 #235347 #8EB69B #DAF1DE #F2F2F2
 let startAngle = 0;
-let arc = 2 * Math.PI / options.length;
+let arc = 2 * Math.PI / 8;  // Fixed to 8 segments
 let spinTimeout = null;
 let spinAngleStart = 0;
 let spinTime = 0;
@@ -28,8 +52,11 @@ function scaleCanvas(canvas, ctx) {
     // Restore the original canvas dimensions for CSS styling
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-  }
-  
+
+    // Add click event listener
+    canvas.addEventListener('click', handleWheelClick);
+}
+
 function isColorDark(color) {
     // Convert hex color to RGB
     const hex = color.replace("#", "");
@@ -64,7 +91,7 @@ function truncateOption(option) {
       const angle = startAngle + i * arc;
   
       // Draw the segment
-      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillStyle = favorites.has(option.id) ? favoriteColor : colors[i % colors.length];
       ctx.beginPath();
       ctx.moveTo(canvas.width / 2, canvas.height / 2);
       ctx.arc(
@@ -77,8 +104,22 @@ function truncateOption(option) {
       ctx.lineTo(canvas.width / 2, canvas.height / 2);
       ctx.fill();
   
+      // Draw favorite star if restaurant is favorited
+      if (favorites.has(option.id)) {
+        ctx.save();
+        ctx.translate(
+          canvas.width / 2 + Math.cos(angle + arc / 2) * (canvas.width / 2 - 80),
+          canvas.height / 2 + Math.sin(angle + arc / 2) * (canvas.height / 2 - 80)
+        );
+        ctx.rotate(angle + arc / 2);
+        ctx.fillStyle = "#000";
+        ctx.font = "20px Arial";
+        ctx.fillText("★", -10, 0);
+        ctx.restore();
+      }
+  
       // Determine font color based on segment color
-      const fontColor = isColorDark(colors[i % colors.length]) ? "white" : "black";
+      const fontColor = isColorDark(favorites.has(option.id) ? favoriteColor : colors[i % colors.length]) ? "white" : "black";
   
       // Draw the text
       ctx.save();
@@ -151,54 +192,68 @@ function truncateOption(option) {
   
   function rotateWheel() {
     spinTime += 30;
+    
+    // Update progress bar
+    const progressPercent = Math.min(100, (spinTime / spinTimeTotal) * 100);
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar) {
+      progressBar.style.width = `${progressPercent}%`;
+    }
+    
     if (spinTime >= spinTimeTotal) {
       clearTimeout(spinTimeout);
   
-      // Calculate the winning segment based on the final angle
+      // Calculate the winning segment
       const degrees = (startAngle * 180) / Math.PI + 90;
       const normalizedDegrees = degrees % 360;
       const selectedIndex = Math.floor(normalizedDegrees / (360 / options.length));
       const selectedOption = options[options.length - 1 - selectedIndex];
+      
+      if (selectedOption && selectedOption.name) {
+        // Motivational messages
+        const messages = [
+          "Time to fuel your body with something nutritious! 🍎",
+          "Great choice! Enjoy your healthy meal. 🌱",
+          "A healthy lunch keeps the energy flowing! 💪",
+          "Your body will thank you for this meal. 🥗",
+          "Eating healthy today sets you up for success! 🏆",
+          "Tasty and healthy? You've got it! 🍽️",
+          "Healthy food, happy mood! 😊",
+        ];
+  
+        const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+  
+        // Show result
+        swal({
+          title: `Selected: ${selectedOption.name}`,
+          content: (() => {
+            const content = document.createElement("div");
+            const paragraph = document.createElement("p");
+            const link = document.createElement("a");
+            
+            paragraph.style.fontSize = "12px";
+            paragraph.textContent = randomMessage;
         
-      // Motivational messages to encourage the user
-      const messages = [
-        "Time to fuel your body with something nutritious! 🍎",
-        "Great choice! Enjoy your healthy meal. 🌱",
-        "A healthy lunch keeps the energy flowing! 💪",
-        "Your body will thank you for this meal. 🥗",
-        "Eating healthy today sets you up for success! 🏆",
-        "Tasty and healthy? You've got it! 🍽️",
-        "Healthy food, happy mood! 😊",
-      ];
-  
-      // Select a random motivational message
-      const randomMessage = messages[Math.floor(Math.random() * messages.length)];
-  
-      // Show result + motivational message
-      swal({
-        title: `Selected Option: ${selectedOption.name}`,
-        content: (() => {
-          const content = document.createElement("div");
-          const paragraph = document.createElement("p");
-          const link = document.createElement("a");
-          
-          paragraph.style.fontSize = "12px";
-          paragraph.textContent = randomMessage; // Add the motivational message
-      
-          link.href = selectedOption.googleMapsLink; // Set the Google Maps link
-          link.target = "_blank"; // Open the link in a new tab
-          link.textContent = "View on Google Maps"; // Text for the link
-          link.style.color = "#a2a2a2"; // Optional: Add a color to the link
-          link.style.fontSize = "10px";
-      
-          content.appendChild(paragraph);
-          content.appendChild(link);
-      
-          return content;
-        })(),
-        icon: "success",
-        button: false, // Hide the default OK button
-      });
+            link.href = selectedOption.googleMapsLink;
+            link.target = "_blank";
+            link.textContent = "View on Google Maps";
+            link.style.color = "#a2a2a2";
+            link.style.fontSize = "10px";
+        
+            content.appendChild(paragraph);
+            content.appendChild(link);
+        
+            return content;
+          })(),
+          icon: "success",
+          button: false,
+        });
+        
+        // Add to history
+        if (typeof addToHistory === 'function') {
+          addToHistory(selectedOption);
+        }
+      }
       
       return;
     }
@@ -217,12 +272,61 @@ function finalizeWheel() {
 }
 
 function spin() {
+  if (options.length === 0) {
+    alert("Please wait while we load restaurants...");
+    return;
+  }
+  
+  // Show progress bar
+  const progressContainer = document.getElementById('progress-container');
+  if (progressContainer) {
+    progressContainer.style.display = 'block';
+  }
+  
+  // Reset progress bar
+  const progressBar = document.getElementById('progress-bar');
+  if (progressBar) {
+    progressBar.style.width = '0%';
+  }
+  
   spinAngleStart = Math.random() * 10 + 10;
   spinTime = 0;
-  spinTimeTotal = Math.random() * 3000 + 3000; // Spin duration between 3-6 seconds
+  spinTimeTotal = Math.random() * 3000 + 3000;
   rotateWheel();
+  
+  // Hide progress bar after spin completes
+  setTimeout(() => {
+    if (progressContainer) {
+      progressContainer.style.display = 'none';
+    }
+  }, spinTimeTotal + 500);
 }
 
-document.getElementById("spin").addEventListener("click", () => spin());
+// Add function to handle wheel clicks
+function handleWheelClick(event) {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Calculate angle from center
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const angle = Math.atan2(y - centerY, x - centerX);
+    
+    // Convert angle to segment index
+    let normalizedAngle = angle - startAngle;
+    if (normalizedAngle < 0) normalizedAngle += 2 * Math.PI;
+    const segmentIndex = Math.floor(normalizedAngle / arc);
+    
+    // Check if click is within the wheel radius
+    const distanceFromCenter = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+    if (distanceFromCenter > 50 && distanceFromCenter < canvas.width / 2) {
+        const clickedOption = options[segmentIndex];
+        if (clickedOption) {
+            toggleFavorite(clickedOption.id);
+        }
+    }
+}
+
 scaleCanvas(canvas, ctx);
 drawWheel();
